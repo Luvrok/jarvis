@@ -61,6 +61,33 @@ in
         "*/small-tokens.txt"
       ];
 
+  # stt, nvidia's parakeet tdt 0.6b v3: 25 european languages, russian and
+  # english among them, with punctuation. better than whisper small and
+  # quicker on the cpu (11 s of speech in ~1 s on 4 threads). cc-by-4.0
+  parakeet-v3 =
+    tarball "parakeet-v3" "${sherpa}/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2"
+      "sha256-V5PQ/Tl8V3jSzyEmmU1Y6dVrG+fATRPHoVuxtOr7Fr8="
+      [
+        "*/encoder.int8.onnx"
+        "*/decoder.int8.onnx"
+        "*/joiner.int8.onnx"
+        "*/tokens.txt"
+      ];
+
+  # stt, sber's gigaam v2 rnnt: russian only, the most exact at it, no
+  # punctuation. english comes out as russian words
+  gigaam-v2 =
+    tarball "gigaam-v2"
+      "${sherpa}/asr-models/sherpa-onnx-nemo-transducer-giga-am-v2-russian-2025-04-19.tar.bz2"
+      "sha256-bEvsTEpwlh/E7Fg79VBgiUgKmmScGBbvlrbk+4M4zXE="
+      [
+        "*/encoder.int8.onnx"
+        "*/decoder.onnx"
+        "*/joiner.onnx"
+        "*/tokens.txt"
+        "*/LICENSE"
+      ];
+
   # the wake word, english. bpe.model turns a character's phrase into its
   # tokens at build time
   kws =

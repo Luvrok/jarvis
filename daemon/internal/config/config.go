@@ -40,8 +40,12 @@ type Config struct {
 		LoreBudget int `toml:"lore_budget"`
 	} `toml:"character"`
 	STT struct {
+		// a whisper folder, the one model before there were choices
 		Model   string `toml:"model"`
 		Threads int    `toml:"threads"`
+		// the one at the start, the menu's pick wins after
+		Default string      `toml:"default"`
+		Choices []STTChoice `toml:"choices"`
 	} `toml:"stt"`
 	VAD struct {
 		Model string `toml:"model"`
@@ -95,10 +99,25 @@ func Load(path string) (*Config, error) {
 	if _, err := toml.DecodeFile(path, c); err != nil {
 		return nil, fmt.Errorf("config %s: %w", path, err)
 	}
+	if len(c.STT.Choices) == 0 && c.STT.Model != "" {
+		c.STT.Choices = []STTChoice{{ID: "whisper", Name: "Whisper small", Kind: "whisper", Dir: c.STT.Model}}
+	}
+	if !slices.ContainsFunc(c.STT.Choices, func(s STTChoice) bool { return s.ID == c.STT.Default }) && len(c.STT.Choices) > 0 {
+		c.STT.Default = c.STT.Choices[0].ID
+	}
 	if !slices.ContainsFunc(c.LLM.Choices, func(m LLMChoice) bool { return m.Model == c.LLM.Model }) {
 		c.LLM.Choices = append([]LLMChoice{{Model: c.LLM.Model, Name: c.LLM.Model}}, c.LLM.Choices...)
 	}
 	return c, nil
+}
+
+// a speech to text model the menu offers: kind is whisper or transducer
+// (nemo: parakeet, gigaam), dir its sherpa-onnx folder
+type STTChoice struct {
+	ID   string `toml:"id" json:"id"`
+	Name string `toml:"name" json:"name"`
+	Kind string `toml:"kind" json:"-"`
+	Dir  string `toml:"dir" json:"-"`
 }
 
 // an llm the menu offers: its llama-swap model and what the menu shows
@@ -189,6 +208,8 @@ type State struct {
 	Clones string `toml:"clones"`
 	// the llm's llama-swap model
 	LLM string `toml:"llm"`
+	// the speech to text model, its id
+	STT string `toml:"stt"`
 }
 
 func statePath() string {

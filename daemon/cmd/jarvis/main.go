@@ -33,6 +33,7 @@ const usage = `usage: jarvis <command>
                           hal 9000, mayuri): 0.6b quicker, 1.7b closer
   llm [model]             the llm the characters think with: the list,
                           or pick one of it
+  stt [model]             the speech to text model: the list, or pick one
   last                    print the last answer
   check                   say what keeps jarvis from working
 `
@@ -73,7 +74,9 @@ func main() {
 	case "clones":
 		os.Exit(clones(os.Args[2:]))
 	case "llm":
-		os.Exit(llms(os.Args[2:]))
+		os.Exit(choice("llms", "set_llm", os.Args[2:]))
+	case "stt":
+		os.Exit(choice("stts", "set_stt", os.Args[2:]))
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
@@ -246,15 +249,16 @@ func clones(args []string) int {
 	})
 }
 
-// llms: the llms to pick from, the picked one marked, or pick one first
-func llms(args []string) int {
+// choice: a list to pick from (the llms, the stt models), the picked one
+// marked, or pick one first
+func choice(list, set string, args []string) int {
 	code := 0
 	cmd := map[string]any{"type": "watch"}
 	if len(args) > 0 {
-		cmd = map[string]any{"type": "set_llm", "id": args[0]}
+		cmd = map[string]any{"type": set, "id": args[0]}
 	}
 	sent := send(cmd, func(m map[string]any) bool {
-		if m["type"] != "llms" {
+		if m["type"] != list {
 			return false
 		}
 		list, _ := m["list"].([]any)
@@ -268,7 +272,7 @@ func llms(args []string) int {
 				// the list from before the pick, the next one has it
 				return false
 			}
-			log.Printf("no llm %q, these are:", args[0])
+			log.Printf("no %q, these are:", args[0])
 			code = 2
 		}
 		for _, x := range list {
