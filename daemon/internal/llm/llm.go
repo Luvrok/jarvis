@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 type Message struct {
@@ -89,7 +90,8 @@ func (c *Client) Chat(ctx context.Context, messages []Message, tools []Tool) (Me
 	}
 	var out struct {
 		Choices []struct {
-			Message Message `json:"message"`
+			Message      Message `json:"message"`
+			FinishReason string  `json:"finish_reason"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
@@ -100,7 +102,21 @@ func (c *Client) Chat(ctx context.Context, messages []Message, tools []Tool) (Me
 	}
 	m := out.Choices[0].Message
 	m.Role = "assistant"
+	// cut at max_tokens: the last whole sentence, not half a word
+	if out.Choices[0].FinishReason == "length" {
+		m.Content = WholeSentences(m.Content)
+	}
 	return m, nil
+}
+
+// WholeSentences: text up to its last . ! ? or …, all of it when it has none
+func WholeSentences(s string) string {
+	i := strings.LastIndexAny(s, ".!?…")
+	if i < 0 {
+		return s
+	}
+	_, size := utf8.DecodeRuneInString(s[i:])
+	return s[:i+size]
 }
 
 // the ids llama-swap serves, for jarvis check

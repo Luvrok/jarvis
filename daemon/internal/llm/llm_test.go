@@ -31,3 +31,16 @@ func TestLang(t *testing.T) {
 		}
 	}
 }
+
+func TestWholeSentences(t *testing.T) {
+	for in, want := range map[string]string{
+		"Жил-был робот. Он был добр. И одна": "Жил-был робот. Он был добр.",
+		"Wow! Then he said…and":              "Wow! Then he said…",
+		"no stop at all":                     "no stop at all",
+		"Всё?":                               "Всё?",
+	} {
+		if got := WholeSentences(in); got != want {
+			t.Errorf("%q: got %q, want %q", in, got, want)
+		}
+	}
+}
