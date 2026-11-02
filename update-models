@@ -2,9 +2,11 @@
 # fills models.lock.json from the hugging face api: each repo's rev becomes
 # its commit, and every file that matches include and not exclude gets its
 # sha256. lfs files carry it in the api, the small ones are downloaded and
-# hashed. run it after changing a repo or a rev:
-#   ./update-models            all of them
-#   ./update-models mayuri     one
+# hashed. a locked commit stays as it is, --latest moves to the repo's main:
+#   ./update-models                     all of them, at their locked commits
+#   ./update-models mayuri              one
+#   ./update-models --latest            all of them, at main
+#   ./update-models --latest tts-base   one, at main
 # then look at the files it picked: a repo with several checkpoints needs
 # a narrower include
 set -euo pipefail
@@ -15,7 +17,13 @@ api=https://huggingface.co/api/models
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 
+latest=false
+if [ "${1:-}" = --latest ]; then
+  latest=true
+  shift
+fi
 names=("$@")
+changed=0
 [ ${#names[@]} -gt 0 ] || mapfile -t names < <(jq -r 'keys[]' "$lock")
 
 # bash globs, * matches / too
@@ -32,6 +40,8 @@ matches() {
 for name in "${names[@]}"; do
   repo=$(jq -er --arg n "$name" '.[$n].repo' "$lock")
   rev=$(jq -r --arg n "$name" '.[$n].rev' "$lock")
+  old=$(jq -c --arg n "$name" '[.[$n].rev, .[$n].files]' "$lock")
+  ! $latest || rev=main
   include=$(jq -r --arg n "$name" '.[$n].include[]' "$lock")
   exclude=$(jq -r --arg n "$name" '.[$n].exclude[]' "$lock")
 
@@ -54,4 +64,15 @@ for name in "${names[@]}"; do
   jq --arg n "$name" --arg s "$sha" --argjson f "$files" \
     '.[$n].rev = $s | .[$n].files = $f' "$lock" >"$tmp"
   cp "$tmp" "$lock"
+  if [ "$(jq -c --arg n "$name" '[.[$n].rev, .[$n].files]' "$lock")" = "$old" ]; then
+    echo "  unchanged" >&2
+  else
+    changed=$((changed + 1))
+  fi
 done
+
+if [ "$changed" -eq 0 ]; then
+  echo "nothing changed$($latest || echo ", --latest checks for newer commits")" >&2
+else
+  echo "$changed changed: look at models.lock.json, commit it, then nix flake update jarvis where it's used" >&2
+fi

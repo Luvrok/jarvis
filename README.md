@@ -188,4 +188,12 @@ States: `idle`, `listening`, `transcribing`, `thinking`, `searching`,
 
 `./update-models` fills `models.lock.json` from the Hugging Face API: each
 repo's commit and a sha256 per file (LFS files carry it there, nothing big
-is downloaded). Run it after changing a repo or a rev, one entry or all.
+is downloaded). It keeps every entry at its locked commit, so a run without
+changes changes nothing; `--latest` moves entries to their repo's main:
+
+```bash
+./update-models --latest            # all of them
+./update-models --latest tts-base   # one
+```
+
+A new entry in the lock starts with `"rev": "main"` and `"files": {}`.
