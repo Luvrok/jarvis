@@ -1,5 +1,5 @@
 # jarvis: a local voice assistant. the go daemon listens (wake word, vad
-# and whisper on the cpu), an llm in llama-swap answers as the active
+# and speech to text on the cpu), an llm in llama-swap answers as the active
 # character, qwen3-tts in llama-swap speaks it in that character's voice.
 # a menu talks to the daemon over its socket, that lives with the desktop
 # (see the readme). off by default. off means nothing here: no unit, no
@@ -15,6 +15,25 @@ let
   cfg = config.services.jarvis;
   inherit (cfg) proxy modelsDir;
   models = import ./models.nix { inherit pkgs lib proxy; };
+
+  # the speech to text models: what the menu shows, their kind, the files
+  sttModels = {
+    parakeet-v3 = {
+      name = "Parakeet v3 · ru en";
+      kind = "transducer";
+      files = models.parakeet-v3;
+    };
+    gigaam-v2 = {
+      name = "GigaAM v2 · ru";
+      kind = "transducer";
+      files = models.gigaam-v2;
+    };
+    whisper-small = {
+      name = "Whisper small";
+      kind = "whisper";
+      files = models.whisper-small;
+    };
+  };
   refs = import ./refs.nix { inherit pkgs lib models; };
   podman = lib.getExe config.virtualisation.podman.package;
   jarvis = cfg.package;
@@ -64,7 +83,12 @@ let
       refs = "${modelsDir}/refs";
     };
     stt = {
-      model = "${modelsDir}/stt/whisper-small";
+      default = cfg.stt.model;
+      choices = map (id: {
+        inherit id;
+        inherit (sttModels.${id}) name kind;
+        dir = "${modelsDir}/stt/${id}";
+      }) cfg.stt.models;
       threads = 4;
     };
     vad.model = "${modelsDir}/silero_vad.onnx";
@@ -117,10 +141,6 @@ let
   modelTree = pkgs.linkFarm "jarvis-models" (
     [
       {
-        name = "stt/whisper-small";
-        path = models.whisper-small;
-      }
-      {
         name = "kws";
         path = models.kws;
       }
@@ -133,6 +153,10 @@ let
         path = models.tts-base;
       }
     ]
+    ++ map (id: {
+      name = "stt/${id}";
+      path = sttModels.${id}.files;
+    }) cfg.stt.models
     ++ lib.optional (models.tts-base-small != null) {
       name = "tts/base-small";
       path = models.tts-base-small;
@@ -297,6 +321,20 @@ in
       default = "jarvis";
       description = "The llm at the start, one of llms. The menu's pick wins after.";
     };
+    stt.models = lib.mkOption {
+      type = lib.types.listOf (lib.types.enum (lib.attrNames sttModels));
+      default = [
+        "parakeet-v3"
+        "gigaam-v2"
+        "whisper-small"
+      ];
+      description = "The speech to text models to download and offer in the menu, in its order.";
+    };
+    stt.model = lib.mkOption {
+      type = lib.types.enum (lib.attrNames sttModels);
+      default = "parakeet-v3";
+      description = "The speech to text model at the start, one of stt.models. The menu's pick wins after.";
+    };
     wakeWord.enable = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -381,6 +419,10 @@ in
       {
         assertion = lib.elem cfg.character characterDirs;
         message = "services.jarvis.character: no characters/${cfg.character}";
+      }
+      {
+        assertion = lib.elem cfg.stt.model cfg.stt.models;
+        message = "services.jarvis.stt.model: ${cfg.stt.model} isn't in services.jarvis.stt.models";
       }
       {
         assertion = cfg.llms ? ${cfg.llm};

@@ -1,7 +1,7 @@
 # jarvis
 
-A local voice assistant for NixOS. You speak, whisper transcribes it on the
-CPU, an LLM in [llama-swap](https://github.com/mostlygeek/llama-swap) answers
+A local voice assistant for NixOS. You speak, Parakeet (or GigaAM, or
+whisper) transcribes it on the CPU, an LLM in [llama-swap](https://github.com/mostlygeek/llama-swap) answers
 as a character, and Qwen3-TTS speaks the answer in that character's voice.
 Nothing leaves the machine except the web searches you ask for.
 
@@ -147,6 +147,8 @@ services.jarvis.llms = {
 | `character` | `"jarvis"` | the one at the start, the menu's pick wins after |
 | `llms` | `{ jarvis = "jarvis"; }` | llama-swap model → its name in the menu |
 | `llm` | `"jarvis"` | the one at the start, the menu's pick wins after |
+| `stt.models` | all three | the speech to text models to download, in the menu's order |
+| `stt.model` | `"parakeet-v3"` | the one at the start, the menu's pick wins after |
 | `wakeWord.enable` | `true` | the active character's "hey ..." |
 | `audio.source` | `"default"` | the input device, the menu's pick wins after |
 | `history.turns` | `6` | exchanges kept for the next question |
@@ -173,6 +175,7 @@ jarvis new               a new chat
 jarvis unload            free the vram, and a new chat
 jarvis clones small|big  the cloned voices on the 0.6b or the 1.7b model
 jarvis llm [model]       the llms, or pick one
+jarvis stt [model]       the speech to text models, or pick one
 jarvis last              the last answer
 jarvis check             what keeps jarvis from working
 ```
@@ -187,6 +190,17 @@ still fits ("либревульф" is LibreWolf). The app starts with
 `systemd-run --user`, as its own unit, so it outlives a restart of
 jarvis. Nothing close enough: the llm gets the three closest names and
 asks.
+
+## Speech to text
+
+All on the CPU through sherpa-onnx, one loaded at a time; a pick in the
+menu loads the new one in the background, the old one answers until then.
+
+| Model | Languages | |
+|---|---|---|
+| `parakeet-v3` | 25 European, Russian and English among them | NVIDIA's Parakeet TDT 0.6B v3, punctuation, 11 s of speech in ~1 s on 4 threads. CC-BY-4.0 |
+| `gigaam-v2` | Russian | Sber's GigaAM v2 RNNT, the most exact in Russian, no punctuation, English turns into Russian words |
+| `whisper-small` | all | the one before these, weaker in Russian |
 
 ## Characters
 
@@ -222,7 +236,7 @@ load as they are: `key`/`keys`, `keysecondary` with `selective`,
 A key matches at the start of a word, any ending after it, so a russian
 stem finds every case: `машин` finds `машину времени`. `/regex/i` keys are
 regular expressions. The lorebooks people share are mostly in English, and
-the user's words come from whisper: add the russian spellings to the keys
+the user's words come from the speech to text model: add the russian spellings to the keys
 (`["Okabe", "Окабе", "Окабэ"]`) for a conversation in russian.
 
 The fan-made character voices and lorebooks are for personal use only.
@@ -234,10 +248,10 @@ The fan-made character voices and lorebooks are for personal use only.
 
 The daemon sends `hello`, `state`, `level` (0..1, `mic` or `tts`, ~30 Hz),
 `transcript`, `answer`, `characters`, `sources`, `loaded` (its models
-llama-swap has up), `clones`, `llms`, `new_chat`, `error`, `check`.
+llama-swap has up), `clones`, `llms`, `stts`, `new_chat`, `error`, `check`.
 
 A client sends `listen`, `stop`, `close`, `pause`, `resume`, `set_source`,
-`set_character`, `preview_character`, `set_clones`, `set_llm`, `new_chat`, `unload`,
+`set_character`, `preview_character`, `set_clones`, `set_llm`, `set_stt`, `new_chat`, `unload`,
 `last_answer`, `check`, and `watch` for a passive client (a bar icon): while
 only passive clients are connected, the answer reopens the menu.
 

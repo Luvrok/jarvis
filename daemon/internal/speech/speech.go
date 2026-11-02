@@ -1,4 +1,4 @@
-// speech: wake word, vad and whisper, all sherpa-onnx through its c api,
+// speech: wake word, vad and speech to text, all sherpa-onnx through its c api,
 // all on the cpu. audio is 16 khz mono float32
 package speech
 
@@ -54,15 +54,32 @@ func pick(dir string, patterns ...string) string {
 	return filepath.Join(dir, patterns[len(patterns)-1])
 }
 
-// whisper
+// speech to text: whisper, or a nemo transducer (parakeet, gigaam)
 
-type Whisper struct {
+const (
+	KindWhisper    = "whisper"
+	KindTransducer = "transducer"
+)
+
+type Recognizer struct {
 	rec *C.SherpaOnnxOfflineRecognizer
 }
 
-// dir is the sherpa-onnx whisper export: <name>-encoder.int8.onnx,
-// <name>-decoder.int8.onnx, <name>-tokens.txt
-func WhisperFiles(dir string) []string {
+// Whisper is the old name, the tests use it
+type Whisper = Recognizer
+
+// the files of a model folder, the sherpa-onnx exports:
+// whisper: <name>-encoder.int8.onnx, <name>-decoder.int8.onnx, <name>-tokens.txt
+// transducer: encoder, decoder and joiner (.int8.onnx or .onnx), tokens.txt
+func Files(kind, dir string) []string {
+	if kind == KindTransducer {
+		return []string{
+			pick(dir, "encoder.int8.onnx", "encoder.onnx"),
+			pick(dir, "decoder.int8.onnx", "decoder.onnx"),
+			pick(dir, "joiner.int8.onnx", "joiner.onnx"),
+			pick(dir, "tokens.txt"),
+		}
+	}
 	return []string{
 		pick(dir, "*-encoder.int8.onnx", "*-encoder.onnx"),
 		pick(dir, "*-decoder.int8.onnx", "*-decoder.onnx"),
@@ -70,8 +87,17 @@ func WhisperFiles(dir string) []string {
 	}
 }
 
-func NewWhisper(dir string, threads int) (*Whisper, error) {
-	files := WhisperFiles(dir)
+func WhisperFiles(dir string) []string { return Files(KindWhisper, dir) }
+
+func NewWhisper(dir string, threads int) (*Recognizer, error) {
+	return NewRecognizer(KindWhisper, dir, threads)
+}
+
+func NewRecognizer(kind, dir string, threads int) (*Recognizer, error) {
+	if kind != KindWhisper && kind != KindTransducer {
+		return nil, fmt.Errorf("stt: kind is %s or %s, not %q", KindWhisper, KindTransducer, kind)
+	}
+	files := Files(kind, dir)
 	if err := need(files...); err != nil {
 		return nil, err
 	}
@@ -79,26 +105,35 @@ func NewWhisper(dir string, threads int) (*Whisper, error) {
 	defer s.free()
 	var c C.SherpaOnnxOfflineRecognizerConfig
 	c.feat_config.sample_rate = SampleRate
+	// nemo models say their own in the onnx metadata, sherpa-onnx reads it
 	c.feat_config.feature_dim = 80
-	c.model_config.whisper.encoder = s.add(files[0])
-	c.model_config.whisper.decoder = s.add(files[1])
-	// empty: whisper finds the language itself
-	c.model_config.whisper.language = s.add("")
-	c.model_config.whisper.task = s.add("transcribe")
-	c.model_config.whisper.tail_paddings = -1
-	c.model_config.tokens = s.add(files[2])
+	if kind == KindTransducer {
+		c.model_config.transducer.encoder = s.add(files[0])
+		c.model_config.transducer.decoder = s.add(files[1])
+		c.model_config.transducer.joiner = s.add(files[2])
+		c.model_config.model_type = s.add("nemo_transducer")
+		c.model_config.tokens = s.add(files[3])
+	} else {
+		c.model_config.whisper.encoder = s.add(files[0])
+		c.model_config.whisper.decoder = s.add(files[1])
+		// empty: whisper finds the language itself
+		c.model_config.whisper.language = s.add("")
+		c.model_config.whisper.task = s.add("transcribe")
+		c.model_config.whisper.tail_paddings = -1
+		c.model_config.tokens = s.add(files[2])
+	}
 	c.model_config.num_threads = C.int32_t(threads)
 	c.model_config.provider = s.add("cpu")
 	c.decoding_method = s.add("greedy_search")
 	rec := C.SherpaOnnxCreateOfflineRecognizer(&c)
 	if rec == nil {
-		return nil, errors.New("whisper: sherpa-onnx could not load the model")
+		return nil, fmt.Errorf("stt: sherpa-onnx could not load %s", dir)
 	}
-	return &Whisper{rec: rec}, nil
+	return &Recognizer{rec: rec}, nil
 }
 
-// text and the language whisper heard (en, ru, ...)
-func (w *Whisper) Transcribe(samples []float32) (string, string) {
+// text and the language heard (en, ru, ...), whisper only says the latter
+func (w *Recognizer) Transcribe(samples []float32) (string, string) {
 	if len(samples) == 0 {
 		return "", ""
 	}
@@ -119,7 +154,7 @@ func (w *Whisper) Transcribe(samples []float32) (string, string) {
 	return text, lang
 }
 
-func (w *Whisper) Close() {
+func (w *Recognizer) Close() {
 	C.SherpaOnnxDestroyOfflineRecognizer(w.rec)
 }
 

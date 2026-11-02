@@ -83,3 +83,36 @@ func TestSpotter(t *testing.T) {
 		t.Fatal("no wake word in a clip that has it")
 	}
 }
+
+// the nemo transducers, skipped without them. JARVIS_STT is a folder with
+// parakeet-v3 and gigaam-v2 as their release tarballs unpack (test_wavs
+// in them): both on gigaam's russian clip, parakeet on its english one
+func TestTransducers(t *testing.T) {
+	dir := os.Getenv("JARVIS_STT")
+	if dir == "" {
+		t.Skip("JARVIS_STT not set")
+	}
+	ru := wav(t, filepath.Join(dir, "gigaam-v2/test_wavs/example.wav"))
+	en := wav(t, filepath.Join(dir, "parakeet-v3/test_wavs/en.wav"))
+	for _, c := range []struct {
+		model string
+		clips [][]float32
+	}{
+		{"gigaam-v2", [][]float32{ru}},
+		{"parakeet-v3", [][]float32{ru, en}},
+	} {
+		r, err := NewRecognizer(KindTransducer, filepath.Join(dir, c.model), 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range c.clips {
+			t0 := time.Now()
+			text, _ := r.Transcribe(s)
+			t.Logf("%s: %.1fs of speech in %v: %q", c.model, float64(len(s))/SampleRate, time.Since(t0).Round(time.Millisecond), text)
+			if len([]rune(text)) < 10 {
+				t.Fatalf("%s: got %q", c.model, text)
+			}
+		}
+		r.Close()
+	}
+}
