@@ -64,6 +64,9 @@ type Config struct {
 		WebSearch    string `toml:"web_search"`
 		NotesMCP     string `toml:"notes_mcp"`
 		NotesLibrary string `toml:"notes_library"`
+		// open_app, and the terminal for the apps that want one
+		Apps     bool   `toml:"apps"`
+		Terminal string `toml:"terminal"`
 	} `toml:"tools"`
 	UI struct {
 		OpenCmd    []string `toml:"open_cmd"`

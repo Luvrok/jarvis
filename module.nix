@@ -85,6 +85,8 @@ let
       web_search = if cfg.tools.webSearch == null then "" else cfg.tools.webSearch;
       notes_mcp = if cfg.tools.notesMcp == null then "" else cfg.tools.notesMcp;
       notes_library = "notes";
+      inherit (cfg.tools) apps;
+      terminal = if cfg.tools.terminal == null then "" else cfg.tools.terminal;
     };
     ui = {
       open_cmd = cfg.openCmd;
@@ -330,6 +332,17 @@ in
         else
           null;
       description = "searxng for the web search, its json api. The local one when it's on.";
+    };
+    tools.apps = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "open_app: \"open steam\" starts an installed app (its desktop entry), as its own systemd user unit.";
+    };
+    tools.terminal = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "kitty";
+      description = "What runs the terminal apps open_app starts (it gets -e and the command), null leaves them out.";
     };
     tools.notesMcp = lib.mkOption {
       type = lib.types.nullOr lib.types.str;

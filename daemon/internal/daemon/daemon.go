@@ -123,6 +123,9 @@ func New(cfg *config.Config) (*Daemon, error) {
 		d.model = st.LLM
 	}
 
+	if cfg.Tools.Apps {
+		d.tools.EnableApps(cfg.Tools.Terminal)
+	}
 	if d.audio, err = audio.New(); err != nil {
 		return nil, err
 	}
