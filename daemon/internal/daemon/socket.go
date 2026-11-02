@@ -87,6 +87,7 @@ func (d *Daemon) handle(conn net.Conn) {
 	d.send(c, d.sourcesMsg())
 	d.send(c, d.loadedMsg())
 	d.send(c, d.clonesMsg())
+	d.send(c, d.llmsMsg())
 
 	sc := bufio.NewScanner(conn)
 	sc.Buffer(make([]byte, 64*1024), 64*1024)
@@ -127,6 +128,8 @@ func (d *Daemon) command(c *client, cmd command) {
 		go d.unload()
 	case "set_clones":
 		d.setClones(cmd.ID)
+	case "set_llm":
+		d.setLLM(cmd.ID)
 	case "set_source":
 		d.setSource(cmd.ID)
 	case "set_character":
