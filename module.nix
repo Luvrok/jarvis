@@ -68,7 +68,7 @@ let
     llm = {
       url = cfg.llamaSwapUrl;
       model = cfg.llm;
-      max_tokens = 200;
+      max_tokens = cfg.maxTokens;
       choices = lib.mapAttrsToList (model: name: { inherit model name; }) cfg.llms;
     };
     tts = {
@@ -315,6 +315,11 @@ in
         jarvis-fast = "Qwen3.5 4B";
       };
       description = "The llama-swap models the characters can think with, and their names in the menu.";
+    };
+    maxTokens = lib.mkOption {
+      type = lib.types.int;
+      default = 600;
+      description = "The longest answer, in tokens. A story needs a few hundred; the voice starts only once the whole answer is there.";
     };
     llm = lib.mkOption {
       type = lib.types.str;

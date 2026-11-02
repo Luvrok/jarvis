@@ -147,6 +147,7 @@ services.jarvis.llms = {
 | `character` | `"jarvis"` | the one at the start, the menu's pick wins after |
 | `llms` | `{ jarvis = "jarvis"; }` | llama-swap model → its name in the menu |
 | `llm` | `"jarvis"` | the one at the start, the menu's pick wins after |
+| `maxTokens` | `600` | the longest answer; a cut one ends at its last whole sentence |
 | `stt.models` | all three | the speech to text models to download, in the menu's order |
 | `stt.model` | `"parakeet-v3"` | the one at the start, the menu's pick wins after |
 | `wakeWord.enable` | `true` | the active character's "hey ..." |
