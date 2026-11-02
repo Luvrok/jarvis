@@ -1,6 +1,7 @@
 // tools: what the llm may use when the user asks for it: a web search on
-// searxng and a search in the obsidian notes over their mcp server. each
-// result is short plain text, it goes back into the llm, not to the voice
+// searxng, a search in the obsidian notes over their mcp server, opening
+// an app. each result is short plain text, it goes back into the llm, not
+// to the voice
 package tools
 
 import (
@@ -24,6 +25,10 @@ type Set struct {
 	searxng string
 	notes   *MCP
 	library string
+
+	// open_app is on, terminal runs the apps that want one
+	apps     bool
+	terminal string
 
 	mu sync.Mutex
 	// the notes server's search tool, looked up on first use
@@ -54,6 +59,20 @@ var searchNotes = llm.Tool{
 	Parameters: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"what to look for in the notes"}},"required":["query"]}`),
 }
 
+// EnableApps: open_app on, terminal ("kitty") for the terminal apps
+func (s *Set) EnableApps(terminal string) {
+	s.apps = true
+	s.terminal = terminal
+}
+
+var openApp = llm.Tool{
+	Name: "open_app",
+	Description: "Open (start) an application on the user's computer: a browser, a game launcher, a " +
+		"messenger, an editor, anything installed. Call it right away when the user asks to open, start " +
+		"or launch something. Give the name as the user said it, or its usual English name.",
+	Parameters: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"the app's name, e.g. Steam, Obsidian, Telegram"}},"required":["name"]}`),
+}
+
 // List: the tools that are on
 func (s *Set) List() []llm.Tool {
 	var out []llm.Tool
@@ -63,6 +82,9 @@ func (s *Set) List() []llm.Tool {
 	if s.notes != nil {
 		out = append(out, searchNotes)
 	}
+	if s.apps {
+		out = append(out, openApp)
+	}
 	return out
 }
 
@@ -70,9 +92,14 @@ func (s *Set) List() []llm.Tool {
 func (s *Set) Call(ctx context.Context, name, arguments string) string {
 	var args struct {
 		Query string `json:"query"`
+		Name  string `json:"name"`
 	}
-	if err := json.Unmarshal([]byte(arguments), &args); err != nil || strings.TrimSpace(args.Query) == "" {
-		return "error: the tool needs a query"
+	json.Unmarshal([]byte(arguments), &args)
+	if name == "open_app" {
+		args.Query = args.Name
+	}
+	if strings.TrimSpace(args.Query) == "" {
+		return "error: the tool needs a " + map[bool]string{true: "name", false: "query"}[name == "open_app"]
 	}
 	log.Printf("tool %s: %q", name, args.Query)
 	var out string
@@ -82,6 +109,11 @@ func (s *Set) Call(ctx context.Context, name, arguments string) string {
 		out, err = s.web(ctx, args.Query)
 	case "search_notes":
 		out, err = s.searchNotes(ctx, args.Query)
+	case "open_app":
+		if !s.apps {
+			return "error: no tool " + name
+		}
+		out, err = s.openApp(args.Query)
 	default:
 		return "error: no tool " + name
 	}

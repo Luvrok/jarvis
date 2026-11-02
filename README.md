@@ -155,6 +155,8 @@ services.jarvis.llms = {
 | `notify` | `false` | the answer as a notification while no menu is open |
 | `llamaSwapUrl` | `http://127.0.0.1:11434` | |
 | `tools.webSearch` | the local searxng, if on | `null` turns web search off |
+| `tools.apps` | `true` | `open_app`: "open steam" starts an installed app |
+| `tools.terminal` | `null` | `kitty`: runs the terminal apps `open_app` starts |
 | `tools.notesMcp` | `null` | a docs-mcp-server with a `notes` library |
 | `openCmd` | `qs -c hyprland ipc call menu open jarvis` | what the wake word runs |
 | `path` | `[ quickshell ]` | what `openCmd` needs |
@@ -177,6 +179,17 @@ jarvis stt [model]       the speech to text models, or pick one
 jarvis last              the last answer
 jarvis check             what keeps jarvis from working
 ```
+
+## Opening apps
+
+`open_app` takes the name the user said ("открой стим", "start obsidian")
+and looks for it in the desktop entries (XDG_DATA_DIRS and NixOS'
+profiles): the names, the Russian ones, the generic name, the keywords,
+the file name. Cyrillic is spelled in Latin and a slightly misheard name
+still fits ("либревульф" is LibreWolf). The app starts with
+`systemd-run --user`, as its own unit, so it outlives a restart of
+jarvis. Nothing close enough: the llm gets the three closest names and
+asks.
 
 ## Speech to text
 
