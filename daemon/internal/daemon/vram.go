@@ -14,7 +14,10 @@ import (
 
 // jarvis' models in llama-swap: the llm and every character's voice
 func (d *Daemon) ownModels() []string {
-	out := []string{d.cfg.LLM.Model}
+	var out []string
+	for _, m := range d.cfg.LLM.Choices {
+		out = append(out, m.Model)
+	}
 	if d.cfg.TTS.SmallModel != "" {
 		out = append(out, d.cfg.TTS.SmallModel)
 	}
@@ -109,16 +112,27 @@ func (d *Daemon) isLoaded(model string) bool {
 // start loading now, while the user speaks, instead of one after the
 // other later. a tiny request each, the answers are thrown away. the
 // first generation also compiles the gpu kernels, so the real voice after
-// it doesn't stutter
+// it doesn't stutter.
+// the llm's request is the real prompt up to the question: the system
+// prompt, the tools and the history. llama-server keeps that computed, so
+// the question itself is all that's left to read when it comes
 func (d *Daemon) warm(ch string) {
 	c := d.chars[ch]
-	if !d.isLoaded(d.cfg.LLM.Model) {
+	if c != nil {
+		d.mu.Lock()
+		history := slices.Clone(d.history)
+		if time.Since(d.lastAt) > time.Duration(d.cfg.History.ForgetAfterS)*time.Second {
+			history = nil
+		}
+		d.mu.Unlock()
+		messages := append([]llm.Message{{Role: "system", Content: d.systemPrompt(c)}}, history...)
+		messages = append(messages, llm.Message{Role: "user", Content: "hi"})
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 			defer cancel()
-			short := *d.llm
+			short := d.chat()
 			short.MaxTokens = 1
-			if _, err := short.Chat(ctx, []llm.Message{{Role: "user", Content: "hi"}}, nil); err != nil {
+			if _, err := short.Chat(ctx, messages, d.tools.List()); err != nil {
 				log.Printf("warm llm: %v", err)
 			}
 		}()

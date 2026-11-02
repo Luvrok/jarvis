@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -16,9 +17,12 @@ const DefaultPath = "/etc/jarvis/config.toml"
 
 type Config struct {
 	LLM struct {
-		URL       string `toml:"url"`
+		URL string `toml:"url"`
+		// the one at the start, the menu's pick wins after
 		Model     string `toml:"model"`
 		MaxTokens int    `toml:"max_tokens"`
+		// the llama-swap models the menu offers, Model among them
+		Choices []LLMChoice `toml:"choices"`
 	} `toml:"llm"`
 	TTS struct {
 		URL string `toml:"url"`
@@ -32,6 +36,8 @@ type Config struct {
 		BasePrompt string `toml:"base_prompt"`
 		// refs/<id>/ for the cloned voices, only checked here
 		Refs string `toml:"refs"`
+		// the most characters of lorebook entries in one question
+		LoreBudget int `toml:"lore_budget"`
 	} `toml:"character"`
 	STT struct {
 		Model   string `toml:"model"`
@@ -85,10 +91,20 @@ func Load(path string) (*Config, error) {
 	c.History.ForgetAfterS = 600
 	c.UI.Notify = true
 	c.Tools.NotesLibrary = "notes"
+	c.Character.LoreBudget = 2000
 	if _, err := toml.DecodeFile(path, c); err != nil {
 		return nil, fmt.Errorf("config %s: %w", path, err)
 	}
+	if !slices.ContainsFunc(c.LLM.Choices, func(m LLMChoice) bool { return m.Model == c.LLM.Model }) {
+		c.LLM.Choices = append([]LLMChoice{{Model: c.LLM.Model, Name: c.LLM.Model}}, c.LLM.Choices...)
+	}
 	return c, nil
+}
+
+// an llm the menu offers: its llama-swap model and what the menu shows
+type LLMChoice struct {
+	Model string `toml:"model" json:"id"`
+	Name  string `toml:"name" json:"name"`
 }
 
 // the voice of a character: a custom-voice speaker, or a clone of a clip
@@ -111,6 +127,8 @@ type Character struct {
 	// wake.txt: the wake phrase in the kws model's tokens, the module
 	// makes it at build time
 	WakeTokens string `toml:"-"`
+	// lorebook.json, none without one
+	Lore []LoreEntry `toml:"-"`
 }
 
 // every folder with a character.toml, sorted by id
@@ -142,6 +160,9 @@ func LoadCharacters(dir string) (map[string]*Character, []string, error) {
 		if b, err := os.ReadFile(filepath.Join(base, "wake.txt")); err == nil {
 			ch.WakeTokens = strings.TrimSpace(string(b))
 		}
+		if ch.Lore, err = LoadLorebook(filepath.Join(base, "lorebook.json")); err != nil {
+			return nil, nil, fmt.Errorf("character %s: %w", id, err)
+		}
 		if ch.Name == "" {
 			ch.Name = id
 		}
@@ -166,6 +187,8 @@ type State struct {
 	Source    string `toml:"source"`
 	// "small": the cloned voices on the small model
 	Clones string `toml:"clones"`
+	// the llm's llama-swap model
+	LLM string `toml:"llm"`
 }
 
 func statePath() string {

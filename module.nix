@@ -48,8 +48,9 @@ let
   configFile = (pkgs.formats.toml { }).generate "jarvis.toml" {
     llm = {
       url = cfg.llamaSwapUrl;
-      model = "jarvis";
+      model = cfg.llm;
       max_tokens = 200;
+      choices = lib.mapAttrsToList (model: name: { inherit model name; }) cfg.llms;
     };
     tts = {
       url = cfg.llamaSwapUrl;
@@ -278,6 +279,22 @@ in
       default = "jarvis";
       description = "The character at the start, a folder in characters/. The menu's pick wins after.";
     };
+    llms = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = {
+        jarvis = "jarvis";
+      };
+      example = {
+        jarvis = "Gemma 4 12B";
+        jarvis-fast = "Qwen3.5 4B";
+      };
+      description = "The llama-swap models the characters can think with, and their names in the menu.";
+    };
+    llm = lib.mkOption {
+      type = lib.types.str;
+      default = "jarvis";
+      description = "The llm at the start, one of llms. The menu's pick wins after.";
+    };
     wakeWord.enable = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -351,6 +368,10 @@ in
       {
         assertion = lib.elem cfg.character characterDirs;
         message = "services.jarvis.character: no characters/${cfg.character}";
+      }
+      {
+        assertion = cfg.llms ? ${cfg.llm};
+        message = "services.jarvis.llm: ${cfg.llm} isn't in services.jarvis.llms";
       }
     ];
 

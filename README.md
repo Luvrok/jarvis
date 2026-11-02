@@ -22,7 +22,7 @@ NixOS only. The TTS runs in a ROCm container, so the voices need an AMD GPU.
 The menu is not here: it belongs to your desktop. Any client that speaks the
 socket protocol below works. The author's is a Quickshell menu in
 [Luvrok/dotfiles](https://github.com/Luvrok/dotfiles)
-(`nixos/services/hyprland/quickshell/menus/Jarvis.qml`).
+(`modules/nixos/hyprland/quickshell/menus/Jarvis.qml`).
 
 ## Use it
 
@@ -56,8 +56,9 @@ jarvis check
 ## llama-swap
 
 The module doesn't own llama-swap's config. Add these entries to yours. The
-LLM is any chat model, `jarvis` is its name for the daemon; the TTS entries
-keep their ports, the module's units listen there.
+LLM is any chat model, `jarvis` is its name for the daemon (more of them:
+`llms` below); the TTS entries keep their ports, the module's units listen
+there.
 
 ```yaml
 models:
@@ -106,9 +107,37 @@ routing:
           members: [jarvis-tts-base, jarvis-tts-small, jarvis-tts-kurisu]
 ```
 
-`--cache-ram 0` matters: llama-server keeps up to 8 GiB of old prompts in RAM
-by default, and jarvis' prompt changes every minute (it has the time in it).
-`--lazy-mode on` keeps Gemma 4's per-layer embeddings on disk instead of RAM.
+`-np 1` keeps one slot, and the slot keeps the last prompt computed. jarvis'
+prompt starts the same way every time (the rules, the persona, the tools,
+the history), the time and the lore go in the newest message only, so a
+question only has its own few tokens left to read. When the user starts
+speaking the daemon sends that prefix ahead, so even a new character or a
+cold model has it ready by the end of the question.
+
+`--cache-ram 0`: llama-server would also keep up to 8 GiB of old prompts in
+RAM, the one slot is all jarvis needs. `--lazy-mode on` keeps Gemma 4's
+per-layer embeddings on disk instead of RAM.
+
+More llms, in the same group as `jarvis`, each picked in the menu or with
+`jarvis llm`. The daemon asks for no thinking, the server-side flag makes
+sure a template that thinks by default doesn't:
+
+```yaml
+  "jarvis-qwen-9b":
+    cmd: |
+      llama-server --port ${PORT} -np 1
+      -m /var/lib/models/Qwen3.5-9B-UD-Q4_K_XL.gguf
+      --ctx-size 8192 -fa on --cache-type-k q8_0 --cache-type-v q8_0
+      --cache-ram 0 --jinja --chat-template-kwargs '{"enable_thinking":false}'
+    ttl: 600
+```
+
+```nix
+services.jarvis.llms = {
+  jarvis = "Gemma 4 12B";
+  jarvis-qwen-9b = "Qwen3.5 9B";
+};
+```
 
 ## Options
 
@@ -116,6 +145,8 @@ by default, and jarvis' prompt changes every minute (it has the time in it).
 |---|---|---|
 | `enable` | `false` | |
 | `character` | `"jarvis"` | the one at the start, the menu's pick wins after |
+| `llms` | `{ jarvis = "jarvis"; }` | llama-swap model → its name in the menu |
+| `llm` | `"jarvis"` | the one at the start, the menu's pick wins after |
 | `wakeWord.enable` | `true` | the active character's "hey ..." |
 | `audio.source` | `"default"` | the input device, the menu's pick wins after |
 | `history.turns` | `6` | exchanges kept for the next question |
@@ -139,6 +170,7 @@ jarvis pause | resume    close and open the mic, wake word too
 jarvis new               a new chat
 jarvis unload            free the vram, and a new chat
 jarvis clones small|big  the cloned voices on the 0.6b or the 1.7b model
+jarvis llm [model]       the llms, or pick one
 jarvis last              the last answer
 jarvis check             what keeps jarvis from working
 ```
@@ -165,7 +197,22 @@ speaker = "kurisu"
 A cloned voice needs its clip in `refs.nix`, and the files it comes from in
 `models.nix` / `models.lock.json`.
 
-The fan-made character voices are for personal use only.
+### Lorebook
+
+`characters/<id>/lorebook.json`, optional: world info for the character, an
+entry goes into the prompt only when one of its keys comes up in the
+question or the last exchange, up to 2000 characters per question.
+SillyTavern's world info and chub's lorebook (character book v2) exports
+load as they are: `key`/`keys`, `keysecondary` with `selective`,
+`constant`, `order`/`insertion_order`, `disable`/`enabled`.
+
+A key matches at the start of a word, any ending after it, so a russian
+stem finds every case: `машин` finds `машину времени`. `/regex/i` keys are
+regular expressions. The lorebooks people share are mostly in English, and
+the user's words come from whisper: add the russian spellings to the keys
+(`["Okabe", "Окабе", "Окабэ"]`) for a conversation in russian.
+
+The fan-made character voices and lorebooks are for personal use only.
 
 ## The socket
 
@@ -174,10 +221,10 @@ The fan-made character voices are for personal use only.
 
 The daemon sends `hello`, `state`, `level` (0..1, `mic` or `tts`, ~30 Hz),
 `transcript`, `answer`, `characters`, `sources`, `loaded` (its models
-llama-swap has up), `clones`, `new_chat`, `error`, `check`.
+llama-swap has up), `clones`, `llms`, `new_chat`, `error`, `check`.
 
 A client sends `listen`, `stop`, `close`, `pause`, `resume`, `set_source`,
-`set_character`, `preview_character`, `set_clones`, `new_chat`, `unload`,
+`set_character`, `preview_character`, `set_clones`, `set_llm`, `new_chat`, `unload`,
 `last_answer`, `check`, and `watch` for a passive client (a bar icon): while
 only passive clients are connected, the answer reopens the menu.
 

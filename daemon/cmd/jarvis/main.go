@@ -31,6 +31,8 @@ const usage = `usage: jarvis <command>
                           the conversation too
   clones [small|big]      the model of the cloned voices (jarvis, glados,
                           hal 9000, mayuri): 0.6b quicker, 1.7b closer
+  llm [model]             the llm the characters think with: the list,
+                          or pick one of it
   last                    print the last answer
   check                   say what keeps jarvis from working
 `
@@ -70,6 +72,8 @@ func main() {
 		os.Exit(send(map[string]any{"type": "new_chat"}, nil))
 	case "clones":
 		os.Exit(clones(os.Args[2:]))
+	case "llm":
+		os.Exit(llms(os.Args[2:]))
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
@@ -240,4 +244,45 @@ func clones(args []string) int {
 		fmt.Println(m["size"])
 		return true
 	})
+}
+
+// llms: the llms to pick from, the picked one marked, or pick one first
+func llms(args []string) int {
+	code := 0
+	cmd := map[string]any{"type": "watch"}
+	if len(args) > 0 {
+		cmd = map[string]any{"type": "set_llm", "id": args[0]}
+	}
+	sent := send(cmd, func(m map[string]any) bool {
+		if m["type"] != "llms" {
+			return false
+		}
+		list, _ := m["list"].([]any)
+		if len(args) > 0 && m["selected"] != args[0] {
+			known := false
+			for _, x := range list {
+				e, _ := x.(map[string]any)
+				known = known || e["id"] == args[0]
+			}
+			if known {
+				// the list from before the pick, the next one has it
+				return false
+			}
+			log.Printf("no llm %q, these are:", args[0])
+			code = 2
+		}
+		for _, x := range list {
+			e, _ := x.(map[string]any)
+			mark := "  "
+			if e["id"] == m["selected"] {
+				mark = "* "
+			}
+			fmt.Printf("%s%v  %v\n", mark, e["id"], e["name"])
+		}
+		return true
+	})
+	if sent != 0 {
+		return sent
+	}
+	return code
 }

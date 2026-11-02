@@ -75,6 +75,8 @@ type Daemon struct {
 	perChar map[string]float64
 	// the cloned voices on cfg.TTS.SmallModel
 	small bool
+	// the llm's llama-swap model, one of cfg.LLM.Choices
+	model string
 
 	kwsMu   sync.Mutex
 	spotter *speech.Spotter
@@ -116,6 +118,10 @@ func New(cfg *config.Config) (*Daemon, error) {
 		d.source = st.Source
 	}
 	d.small = st.Clones == "small" && cfg.TTS.SmallModel != ""
+	d.model = cfg.LLM.Model
+	if d.hasLLM(st.LLM) {
+		d.model = st.LLM
+	}
 
 	if d.audio, err = audio.New(); err != nil {
 		return nil, err
@@ -353,7 +359,7 @@ func (d *Daemon) request(ctx context.Context) {
 	}
 	messages := append([]llm.Message{{Role: "system", Content: d.systemPrompt(ch)}}, d.history...)
 	d.mu.Unlock()
-	messages = append(messages, llm.Message{Role: "user", Content: text})
+	messages = append(messages, llm.Message{Role: "user", Content: d.withContext(ch, text, messages)})
 	raw, err := d.ask(ctx, messages, d.tools.List())
 	if ctx.Err() != nil {
 		return
@@ -433,7 +439,7 @@ func (d *Daemon) ask(ctx context.Context, messages []llm.Message, tools []llm.To
 			// enough searching, answer with what's there
 			tools = nil
 		}
-		m, err := d.llm.Chat(ctx, messages, tools)
+		m, err := d.chat().Chat(ctx, messages, tools)
 		if err != nil {
 			return "", err
 		}
@@ -596,13 +602,58 @@ var langRules = map[string]string{
 	"ru":   "Always reply in Russian, whatever language the user speaks.",
 }
 
+// systemPrompt: the same for every question of a character, so llama-server
+// keeps it (and the history after it) computed from one question to the
+// next. what changes, the time and the lore, goes in the last message
 func (d *Daemon) systemPrompt(ch *config.Character) string {
 	r := strings.NewReplacer(
 		"{{name}}", ch.Name,
-		"{{datetime}}", time.Now().Format("Monday, January 2, 2006, 15:04"),
 		"{{lang_rule}}", langRules[ch.Lang],
 	)
 	return r.Replace(strings.TrimSpace(d.basePrompt) + "\n\n" + strings.TrimSpace(ch.Persona))
+}
+
+// withContext: the user's words with the time and the lorebook entries
+// they and the last exchange bring up. only in the newest message, the
+// history keeps the bare words
+func (d *Daemon) withContext(ch *config.Character, text string, prev []llm.Message) string {
+	var b strings.Builder
+	b.WriteString("[context, not said by the user]\n")
+	b.WriteString("Now: " + time.Now().Format("Monday, January 2, 2006, 15:04") + "\n")
+	if lore := d.lore(ch, text, prev); len(lore) > 0 {
+		b.WriteString("Background on what was mentioned:\n")
+		for _, l := range lore {
+			b.WriteString("- " + strings.ReplaceAll(l, "\n", " ") + "\n")
+		}
+	}
+	b.WriteString("[the user says]\n")
+	b.WriteString(text)
+	return b.String()
+}
+
+// lore: the character's lorebook entries the question or the last exchange
+// mention, in the book's order, up to the budget
+func (d *Daemon) lore(ch *config.Character, text string, prev []llm.Message) []string {
+	if len(ch.Lore) == 0 {
+		return nil
+	}
+	scan := text
+	// the last exchange: "what about her?" after a question about kurisu
+	for i := max(0, len(prev)-2); i < len(prev); i++ {
+		if prev[i].Role != "system" {
+			scan += "\n" + prev[i].Content
+		}
+	}
+	var out []string
+	left := d.cfg.Character.LoreBudget
+	for _, e := range ch.Lore {
+		if !e.Matches(scan) || len(e.Content) > left {
+			continue
+		}
+		out = append(out, e.Content)
+		left -= len(e.Content)
+	}
+	return out
 }
 
 // pause closes the mic, wake word and all
@@ -695,9 +746,46 @@ func (d *Daemon) clonesMsg() map[string]any {
 	return map[string]any{"type": "clones", "size": size, "small_model": d.cfg.TTS.SmallModel}
 }
 
+// chat: the llm client on the picked model
+func (d *Daemon) chat() *llm.Client {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	c := *d.llm
+	c.Model = d.model
+	return &c
+}
+
+func (d *Daemon) hasLLM(model string) bool {
+	for _, m := range d.cfg.LLM.Choices {
+		if m.Model == model {
+			return true
+		}
+	}
+	return false
+}
+
+// setLLM: the llm for the next questions. the history stays, the new one
+// loads with the next question (or now, warm)
+func (d *Daemon) setLLM(model string) {
+	if !d.hasLLM(model) {
+		return
+	}
+	d.mu.Lock()
+	d.model = model
+	d.mu.Unlock()
+	d.saveState()
+	d.broadcast(d.llmsMsg())
+}
+
+func (d *Daemon) llmsMsg() map[string]any {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return map[string]any{"type": "llms", "list": d.cfg.LLM.Choices, "selected": d.model}
+}
+
 func (d *Daemon) saveState() {
 	d.mu.Lock()
-	s := config.State{Character: d.char.ID, Source: d.source}
+	s := config.State{Character: d.char.ID, Source: d.source, LLM: d.model}
 	if d.small {
 		s.Clones = "small"
 	}
@@ -720,7 +808,10 @@ func (d *Daemon) check() []string {
 		for _, m := range models {
 			have[m] = true
 		}
-		want := []string{d.cfg.LLM.Model}
+		var want []string
+		for _, m := range d.cfg.LLM.Choices {
+			want = append(want, m.Model)
+		}
 		for _, id := range d.ids {
 			want = append(want, d.voiceModel(d.chars[id]))
 		}
