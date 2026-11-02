@@ -43,13 +43,17 @@ type Daemon struct {
 	ids        []string
 	basePrompt string
 
-	audio   *audio.Audio
-	whisper *speech.Whisper
-	vad     *speech.VAD
-	llm     *llm.Client
-	tts     *tts.Client
-	tools   *tools.Set
-	notes   notify.Notifier
+	audio *audio.Audio
+	vad   *speech.VAD
+	llm   *llm.Client
+	tts   *tts.Client
+	tools *tools.Set
+	notes notify.Notifier
+
+	// the speech to text model and its id, sttMu while it's used or swapped
+	sttMu sync.Mutex
+	stt   *speech.Recognizer
+	sttID string
 
 	mu      sync.Mutex
 	state   string
@@ -126,10 +130,14 @@ func New(cfg *config.Config) (*Daemon, error) {
 	if d.audio, err = audio.New(); err != nil {
 		return nil, err
 	}
-	log.Printf("loading whisper from %s", cfg.STT.Model)
-	if d.whisper, err = speech.NewWhisper(cfg.STT.Model, cfg.STT.Threads); err != nil {
+	id := cfg.STT.Default
+	if d.sttChoice(st.STT) != nil {
+		id = st.STT
+	}
+	if d.stt, err = d.loadSTT(id); err != nil {
 		return nil, err
 	}
+	d.sttID = id
 	if d.vad, err = speech.NewVAD(cfg.VAD.Model, cfg.Audio.SilenceMs, cfg.Audio.MaxRecordS); err != nil {
 		return nil, err
 	}
@@ -345,7 +353,9 @@ func (d *Daemon) request(ctx context.Context) {
 
 	d.setState(Transcribing)
 	t0 := time.Now()
-	text, heard := d.whisper.Transcribe(samples)
+	d.sttMu.Lock()
+	text, heard := d.stt.Transcribe(samples)
+	d.sttMu.Unlock()
 	log.Printf("stt %.1fs of audio in %v (%s): %q", float64(len(samples))/speech.SampleRate, time.Since(t0).Round(time.Millisecond), heard, text)
 	if ctx.Err() != nil || strings.TrimSpace(text) == "" {
 		return
@@ -746,6 +756,57 @@ func (d *Daemon) clonesMsg() map[string]any {
 	return map[string]any{"type": "clones", "size": size, "small_model": d.cfg.TTS.SmallModel}
 }
 
+func (d *Daemon) sttChoice(id string) *config.STTChoice {
+	for i, s := range d.cfg.STT.Choices {
+		if s.ID == id {
+			return &d.cfg.STT.Choices[i]
+		}
+	}
+	return nil
+}
+
+func (d *Daemon) loadSTT(id string) (*speech.Recognizer, error) {
+	s := d.sttChoice(id)
+	if s == nil {
+		return nil, fmt.Errorf("stt: no model %q", id)
+	}
+	log.Printf("loading stt %s from %s", s.ID, s.Dir)
+	return speech.NewRecognizer(s.Kind, s.Dir, d.cfg.STT.Threads)
+}
+
+// setSTT: the speech to text model for the next questions. it loads in
+// the background (a few seconds), the old one answers until then
+func (d *Daemon) setSTT(id string) {
+	d.sttMu.Lock()
+	same := id == d.sttID
+	d.sttMu.Unlock()
+	if same || d.sttChoice(id) == nil {
+		d.broadcast(d.sttsMsg())
+		return
+	}
+	go func() {
+		r, err := d.loadSTT(id)
+		if err != nil {
+			d.broadcast(map[string]any{"type": "error", "code": "stt", "message": err.Error()})
+			d.broadcast(d.sttsMsg())
+			return
+		}
+		d.sttMu.Lock()
+		old := d.stt
+		d.stt, d.sttID = r, id
+		d.sttMu.Unlock()
+		old.Close()
+		d.saveState()
+		d.broadcast(d.sttsMsg())
+	}()
+}
+
+func (d *Daemon) sttsMsg() map[string]any {
+	d.sttMu.Lock()
+	defer d.sttMu.Unlock()
+	return map[string]any{"type": "stts", "list": d.cfg.STT.Choices, "selected": d.sttID}
+}
+
 // chat: the llm client on the picked model
 func (d *Daemon) chat() *llm.Client {
 	d.mu.Lock()
@@ -784,8 +845,11 @@ func (d *Daemon) llmsMsg() map[string]any {
 }
 
 func (d *Daemon) saveState() {
+	d.sttMu.Lock()
+	sttID := d.sttID
+	d.sttMu.Unlock()
 	d.mu.Lock()
-	s := config.State{Character: d.char.ID, Source: d.source, LLM: d.model}
+	s := config.State{Character: d.char.ID, Source: d.source, LLM: d.model, STT: sttID}
 	if d.small {
 		s.Clones = "small"
 	}
@@ -824,7 +888,10 @@ func (d *Daemon) check() []string {
 		}
 	}
 	problems = append(problems, d.tools.Check(ctx)...)
-	files := append(speech.WhisperFiles(d.cfg.STT.Model), d.cfg.VAD.Model)
+	files := []string{d.cfg.VAD.Model}
+	for _, s := range d.cfg.STT.Choices {
+		files = append(files, speech.Files(s.Kind, s.Dir)...)
+	}
 	if d.cfg.WakeWord.Enable {
 		files = append(files, speech.KWSFiles(d.cfg.WakeWord.Model)...)
 	}
